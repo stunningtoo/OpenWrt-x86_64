@@ -1,6 +1,6 @@
 # OpenWrt x86_64 云编译固件
 
-[![Release](https://img.shields.io/github/v/release/stunningtoo/OpenWrt-x86_64?display_name=tag)](https://github.com/Samre/OpenWrt-x86_64/releases/latest)
+[![Release](https://img.shields.io/github/v/release/stunningtoo/OpenWrt-x86_64?display_name=tag)](https://github.com/stunningtoo/OpenWrt-x86_64/releases/latest)
 [![Build OpenWrt](https://github.com/stunningtoo/OpenWrt-x86_64/actions/workflows/build-openwrt.yml/badge.svg)](https://github.com/stunningtoo/OpenWrt-x86_64/actions/workflows/build-openwrt.yml)
 
 基于 [Lean's LEDE](https://github.com/coolsnowwolf/lede) 源码、使用 GitHub Actions 自动编译的 **x86_64 软路由固件**。上游有新提交时按计划自动构建，编译成功后自动发布到 [Releases](https://github.com/stunningtoo/OpenWrt-x86_64/releases)。
