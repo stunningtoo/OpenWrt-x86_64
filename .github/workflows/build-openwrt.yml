@@ -20,7 +20,7 @@ on:
         default: 'false'
 
 env:
-  REPO_URL: https://github.com/Samre/lede
+  REPO_URL: https://github.com/stunningtoo/lede
   REPO_BRANCH: master
   UPSTREAM_REPO: coolsnowwolf/lede
   UPSTREAM_BRANCH: master
