@@ -1,16 +1,16 @@
 # OpenWrt x86_64 云编译固件
 
-[![Release](https://img.shields.io/github/v/release/Samre/OpenWrt-x86_64?display_name=tag)](https://github.com/Samre/OpenWrt-x86_64/releases/latest)
-[![Build OpenWrt](https://github.com/Samre/OpenWrt-x86_64/actions/workflows/build-openwrt.yml/badge.svg)](https://github.com/Samre/OpenWrt-x86_64/actions/workflows/build-openwrt.yml)
+[![Release](https://img.shields.io/github/v/release/stunningtoo/OpenWrt-x86_64?display_name=tag)](https://github.com/Samre/OpenWrt-x86_64/releases/latest)
+[![Build OpenWrt](https://github.com/stunningtoo/OpenWrt-x86_64/actions/workflows/build-openwrt.yml/badge.svg)](https://github.com/stunningtoo/OpenWrt-x86_64/actions/workflows/build-openwrt.yml)
 
-基于 [Lean's LEDE](https://github.com/coolsnowwolf/lede) 源码、使用 GitHub Actions 自动编译的 **x86_64 软路由固件**。上游有新提交时按计划自动构建，编译成功后自动发布到 [Releases](https://github.com/Samre/OpenWrt-x86_64/releases)。
+基于 [Lean's LEDE](https://github.com/coolsnowwolf/lede) 源码、使用 GitHub Actions 自动编译的 **x86_64 软路由固件**。上游有新提交时按计划自动构建，编译成功后自动发布到 [Releases](https://github.com/stunningtoo/OpenWrt-x86_64/releases)。
 
 ## 固件信息
 
 | 项目 | 值 |
 |---|---|
 | 目标平台 | x86_64 generic |
-| 源码 | [Samre/lede](https://github.com/Samre/lede)（Lean's LEDE master 分支） |
+| 源码 | [Samre/lede](https://github.com/stunningtoo/lede)（Lean's LEDE master 分支） |
 | 默认后台地址 | `192.168.216.10` |
 | 默认账号 | `root`（默认无密码，首次登录请自行设置） |
 | 防火墙架构 | firewall3 / iptables（注意：不支持依赖 firewall4/nftables 的插件） |
@@ -18,7 +18,7 @@
 
 ## 下载固件
 
-前往 [Latest Release](https://github.com/Samre/OpenWrt-x86_64/releases/latest)：
+前往 [Latest Release](https://github.com/stunningtoo/OpenWrt-x86_64/releases/latest)：
 
 | 文件 | 用途 |
 |---|---|
