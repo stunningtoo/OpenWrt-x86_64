@@ -10,7 +10,7 @@
 | 项目 | 值 |
 |---|---|
 | 目标平台 | x86_64 generic |
-| 源码 | [Samre/lede](https://github.com/stunningtoo/lede)（Lean's LEDE master 分支） |
+| 源码 | [stunningtoo/lede](https://github.com/stunningtoo/lede)（Lean's LEDE master 分支） |
 | 默认后台地址 | `192.168.216.10` |
 | 默认账号 | `root`（默认无密码，首次登录请自行设置） |
 | 防火墙架构 | firewall3 / iptables（注意：不支持依赖 firewall4/nftables 的插件） |
@@ -80,4 +80,4 @@
 
 ## License
 
-[MIT](https://github.com/Samre/OpenWrt-x86_64/blob/main/README.md) © 2019-2020 P3TERX（编译模板部分），其余修改遵循相同协议。
+[MIT](https://github.com/stunningtoo/OpenWrt-x86_64/blob/main/README.md) © 2019-2020 P3TERX（编译模板部分），其余修改遵循相同协议。
