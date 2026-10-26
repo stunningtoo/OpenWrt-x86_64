@@ -45,6 +45,20 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    - name: Free disk space
+      run: |
+        set -euo pipefail
+        before=$(df --output=avail -BM / | tail -1 | tr -d ' M')
+        sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/share/swift \
+                    /opt/ghc /usr/local/.ghcup /usr/local/share/boost \
+                    /opt/hostedtoolcache/CodeQL /usr/local/lib/node_modules \
+                    /usr/local/share/chromium /opt/microsoft
+        sudo apt-get -qq clean
+        sudo docker image prune --all --force || true
+        after=$(df --output=avail -BM / | tail -1 | tr -d ' M')
+        echo "free space before: ${before} MB, after: ${after} MB"
+        df -hT /
+
     - name: Initialization environment
       env:
         DEBIAN_FRONTEND: noninteractive

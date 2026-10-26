@@ -24,6 +24,10 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # repository-dispatch needs a write-capable token; the default is contents:read,
+    # which is exactly what produced "Resource not accessible by integration".
+    permissions:
+      contents: write
 
     steps:
     - name: Checkout
