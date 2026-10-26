@@ -21,6 +21,13 @@ echo "src-git istore https://github.com/linkease/istore;main" >> ./feeds.conf.de
 echo "src-git kenzo https://github.com/kenzok8/openwrt-packages" >> ./feeds.conf.default
 echo "src-git small https://github.com/kenzok8/small" >> ./feeds.conf.default
 
+# OxiDNS LuCI app, built from source. It is a single-package repo, so it goes
+# straight into package/ instead of a feed line; its Makefile already includes
+# $(TOPDIR)/feeds/luci/luci.mk, which the luci feed provides.
+if [ ! -d package/luci-app-oxidns ]; then
+  git clone --depth=1 https://github.com/svenshi/luci-app-oxidns.git package/luci-app-oxidns
+fi
+
 # Free up disk space on GitHub Actions runner
 # The runner has ~28GB total; OpenWrt build with many packages easily exceeds this
 echo "=== Before cleanup ==="

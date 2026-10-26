@@ -12,6 +12,13 @@
 
 REPO_ROOT="${GITHUB_WORKSPACE:-$(pwd)}"
 
+# OxiDNS core: prebuilt binary packaged locally (see package/oxidns-core).
+# Built as a real package so opkg knows about it and it lands in the image.
+if [ -d "$REPO_ROOT/package/oxidns-core" ]; then
+  cp -r "$REPO_ROOT/package/oxidns-core" package/oxidns-core
+  echo "oxidns-core package staged: $(ls package/oxidns-core)"
+fi
+
 # Modify default IP
 sed -i 's/192.168.1.1/192.168.216.10/g' package/base-files/files/bin/config_generate
 
