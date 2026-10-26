@@ -38,6 +38,9 @@ jobs:
     permissions:
       contents: write
       actions: write
+      # the compile step posts disk samples to an issue; the log itself is lost
+      # when the runner fills the disk
+      issues: write
     runs-on: ubuntu-latest
     timeout-minutes: 480
 
@@ -64,6 +67,8 @@ jobs:
         sudo apt-get -qq clean || true
         sudo rm -rf /var/lib/apt/lists/* || true
         sudo docker image prune --all --force || true
+        echo "=== biggest trees left on the runner ==="
+        sudo du -sh /usr/local /usr/lib /usr/share /opt /var /home 2>/dev/null | sort -h | tail -6 || true
         after=$(df --output=avail -BM / | tail -1 | tr -d ' M')
         echo "free space before: ${before} MB, after: ${after} MB"
         df -hT /
@@ -174,11 +179,42 @@ jobs:
 
     - name: Compile the firmware
       id: compile
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         cd openwrt
         echo -e "$(nproc) thread compile"
         df -hT / | tail -1
         du -sh dl staging_dir build_dir tmp 2>/dev/null || true
+        # The cross toolchain build trees are dead weight once it is staged: the
+        # phase stamp lives in staging_dir/toolchain-*/stamp and only toolchain/*
+        # makefiles ever look inside build_dir/toolchain-*.
+        du -sh build_dir/toolchain-* 2>/dev/null | sort -h | tail -3 || true
+        rm -rf build_dir/toolchain-* 2>/dev/null || true
+        df -hT / | tail -1
+        # A runner that fills up dies without uploading any log (the run shows
+        # "log not found"), taking every diagnostic line with it. Post samples to
+        # a tracking issue instead, where they outlive the crash.
+        ISS=$(gh api "repos/$GITHUB_REPOSITORY/issues?state=open&labels=ci-disk&per_page=1" --jq '.[0].number // empty' 2>/dev/null || true)
+        if [ -z "${ISS:-}" ]; then
+          ISS=$(gh api "repos/$GITHUB_REPOSITORY/issues" \
+                  -f title="CI disk telemetry" \
+                  -f body="build-openwrt.yml 编译步骤自动追加的磁盘采样，用来定位 runner 磁盘写满（ENOSPC）。" \
+                  -f "labels[]=ci-disk" --jq .number 2>/dev/null || true)
+        fi
+        echo "telemetry issue: ${ISS:-unavailable}"
+        (
+          while true; do
+            sleep 600
+            freeg=$(df --output=avail -BM / | tail -1 | tr -d ' M')
+            freeg=$((freeg / 1024))
+            sample="$(date -u +%H:%M:%SZ) free=${freeg}G dl=$(du -sh dl 2>/dev/null | cut -f1) staging=$(du -sh staging_dir 2>/dev/null | cut -f1) build=$(du -sh build_dir 2>/dev/null | cut -f1) tmp=$(du -sh tmp 2>/dev/null | cut -f1)"
+            echo "$sample"
+            if [ -n "${ISS:-}" ]; then
+              gh api "repos/$GITHUB_REPOSITORY/issues/$ISS/comments" -f body="$sample" >/dev/null 2>&1 || true
+            fi
+          done
+        ) &
         # One retry only: a third pass on a full disk just burns another 2h.
         if ! make -j$(nproc); then
           # The parallel pass swallows per-package output, so a failure arrives as
