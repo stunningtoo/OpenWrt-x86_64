@@ -186,11 +186,10 @@ jobs:
         echo -e "$(nproc) thread compile"
         df -hT / | tail -1
         du -sh dl staging_dir build_dir tmp 2>/dev/null || true
-        # The cross toolchain build trees are dead weight once it is staged: the
-        # phase stamp lives in staging_dir/toolchain-*/stamp and only toolchain/*
-        # makefiles ever look inside build_dir/toolchain-*.
+        # Do NOT delete build_dir/toolchain-*: it looks disposable, but the
+        # toolchain phase stamps inside it are what stop gdb/binutils from being
+        # rebuilt, and a half-rebuilt binutils dies on as-new (run 40374021452).
         du -sh build_dir/toolchain-* 2>/dev/null | sort -h | tail -3 || true
-        rm -rf build_dir/toolchain-* 2>/dev/null || true
         df -hT / | tail -1
         # A runner that fills up dies without uploading any log (the run shows
         # "log not found"), taking every diagnostic line with it. Post samples to
@@ -203,16 +202,22 @@ jobs:
                   -f "labels[]=ci-disk" --jq .number 2>/dev/null || true)
         fi
         echo "telemetry issue: ${ISS:-unavailable}"
+        # df is cheap, du is not (2 vCPU runner), so sizes every tenth sample.
         (
+          i=0
           while true; do
-            sleep 600
+            i=$((i + 1))
             freeg=$(df --output=avail -BM / | tail -1 | tr -d ' M')
             freeg=$((freeg / 1024))
-            sample="$(date -u +%H:%M:%SZ) free=${freeg}G dl=$(du -sh dl 2>/dev/null | cut -f1) staging=$(du -sh staging_dir 2>/dev/null | cut -f1) build=$(du -sh build_dir 2>/dev/null | cut -f1) tmp=$(du -sh tmp 2>/dev/null | cut -f1)"
+            sample="$(date -u +%H:%M:%SZ) free=${freeg}G"
+            if [ $((i % 10)) -eq 0 ]; then
+              sample="$sample dl=$(du -sh dl 2>/dev/null | cut -f1) staging=$(du -sh staging_dir 2>/dev/null | cut -f1) build=$(du -sh build_dir 2>/dev/null | cut -f1) rootfs=$(du -sh build_dir/target-*/root-* 2>/dev/null | cut -f1) tmp=$(du -sh tmp 2>/dev/null | cut -f1)"
+            fi
             echo "$sample"
             if [ -n "${ISS:-}" ]; then
               gh api "repos/$GITHUB_REPOSITORY/issues/$ISS/comments" -f body="$sample" >/dev/null 2>&1 || true
             fi
+            sleep 180
           done
         ) &
         # One retry only: a third pass on a full disk just burns another 2h.
@@ -223,6 +228,7 @@ jobs:
           echo "::group::diagnose oxidns-core"
           make package/oxidns-core/compile V=s -j1 2>&1 | tail -150 || true
           df -hT / | tail -1
+          du -sh dl build_dir staging_dir tmp 2>/dev/null || true
           echo "::endgroup::"
           make -j1 V=s
         fi
