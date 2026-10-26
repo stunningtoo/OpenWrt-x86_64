@@ -149,18 +149,24 @@ jobs:
         find dl -size -1024c -exec rm -f {} \;
 
     - name: Pre-flight oxidns-core
-      # The parallel compile pass hides per-package output, so a bad recipe here
-      # would only resurface as a nameless "failed to build" three hours later.
-      # Build it alone and verbosely first; the toolchain this pulls in is what
-      # the main build needs anyway.
+      # The parallel compile pass swallows per-package output, so a bad recipe
+      # here would only resurface as a nameless "failed to build" hours later.
+      # A package target cannot be built on its own though: package/libs/toolchain
+      # wants staging_dir/toolchain-*/lib/ld-musl-*.so*, which only appears after
+      # tools/install and toolchain/install. Build those first (the main pass then
+      # reuses them), so the verbose package build below actually runs.
       run: |
         cd openwrt
+        make -j$(nproc) tools/install
+        make -j$(nproc) toolchain/install
+        df -hT / | tail -1
         echo "::group::oxidns-core verbose build"
         if ! make package/oxidns-core/compile V=s -j1; then
           echo "::error::oxidns-core failed to compile - see the group above"
           exit 1
         fi
         echo "::endgroup::"
+        ls -l build_dir/target-x86_64_musl/oxidns-core*/ipkg-install/usr/bin/ 2>/dev/null || true
 
     - name: Compile the firmware
       id: compile
