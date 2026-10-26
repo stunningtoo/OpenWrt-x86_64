@@ -49,11 +49,20 @@ jobs:
       run: |
         set -euo pipefail
         before=$(df --output=avail -BM / | tail -1 | tr -d ' M')
+        # The hosted image ships ~30G of toolchains this build never touches and
+        # the OpenWrt tree eats more than that: run 40287701385 got 42G and still
+        # hit "no space left on device" three hours in, which surfaces as a bare
+        # "failed to build" for whichever package was writing at that moment.
         sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/share/swift \
                     /opt/ghc /usr/local/.ghcup /usr/local/share/boost \
-                    /opt/hostedtoolcache/CodeQL /usr/local/lib/node_modules \
-                    /usr/local/share/chromium /opt/microsoft
-        sudo apt-get -qq clean
+                    /opt/hostedtoolcache /usr/local/lib/node_modules \
+                    /usr/local/share/chromium /opt/microsoft /opt/az \
+                    /opt/google /usr/lib/jvm /usr/lib/mono /usr/lib/R \
+                    /usr/local/aws-cli /usr/local/aws /usr/local/go \
+                    /usr/local/share/powershell /usr/local/share/gecko_driver \
+                    /usr/share/miniconda /imagegeneration || true
+        sudo apt-get -qq clean || true
+        sudo rm -rf /var/lib/apt/lists/* || true
         sudo docker image prune --all --force || true
         after=$(df --output=avail -BM / | tail -1 | tr -d ' M')
         echo "free space before: ${before} MB, after: ${after} MB"
@@ -139,13 +148,38 @@ jobs:
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
 
+    - name: Pre-flight oxidns-core
+      # The parallel compile pass hides per-package output, so a bad recipe here
+      # would only resurface as a nameless "failed to build" three hours later.
+      # Build it alone and verbosely first; the toolchain this pulls in is what
+      # the main build needs anyway.
+      run: |
+        cd openwrt
+        echo "::group::oxidns-core verbose build"
+        if ! make package/oxidns-core/compile V=s -j1; then
+          echo "::error::oxidns-core failed to compile - see the group above"
+          exit 1
+        fi
+        echo "::endgroup::"
+
     - name: Compile the firmware
       id: compile
       run: |
         cd openwrt
         echo -e "$(nproc) thread compile"
+        df -hT / | tail -1
+        du -sh dl staging_dir build_dir tmp 2>/dev/null || true
         # One retry only: a third pass on a full disk just burns another 2h.
-        make -j$(nproc) || make -j1 V=s
+        if ! make -j$(nproc); then
+          # The parallel pass swallows per-package output, so a failure arrives as
+          # a one-line "failed to build" with no reason (that is how oxidns-core
+          # died 1.5s in). Replay that package alone, verbosely, before the retry.
+          echo "::group::diagnose oxidns-core"
+          make package/oxidns-core/compile V=s -j1 2>&1 | tail -150 || true
+          df -hT / | tail -1
+          echo "::endgroup::"
+          make -j1 V=s
+        fi
         echo "status=success" >> "$GITHUB_OUTPUT"
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
