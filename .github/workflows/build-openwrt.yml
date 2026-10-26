@@ -157,6 +157,10 @@ jobs:
       # reuses them), so the verbose package build below actually runs.
       run: |
         cd openwrt
+        # Cheap first: unpacking needs no cross toolchain and dies in seconds if
+        # the tarball layout and the recipe disagree.
+        make package/oxidns-core/prepare V=s
+        ls -l build_dir/target-x86_64_musl/oxidns-core-1.6.1 | head -8
         make -j$(nproc) tools/install
         make -j$(nproc) toolchain/install
         df -hT / | tail -1

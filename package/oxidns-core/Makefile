@@ -38,6 +38,15 @@ define Package/oxidns-core/description
  Installed to /usr/bin/oxidns, the exact path luci-app-oxidns manages.
 endef
 
+# The release tarball is flat: oxidns, config.yaml, LICENSE and webui/ sit at
+# its top level with no leading directory. The default Prepare unpacks into
+# $(PKG_BUILD_DIR)/.., which would scatter those four entries next to the build
+# directory instead of inside it, so unpack into $(PKG_BUILD_DIR) explicitly.
+define Build/Prepare
+	mkdir -p $(PKG_BUILD_DIR)
+	gzip -dc $(DL_DIR)/$(PKG_SOURCE) | $(TAR) -C $(PKG_BUILD_DIR) -xf -
+endef
+
 # prebuilt ELF binary: nothing to compile
 define Build/Compile
 endef
