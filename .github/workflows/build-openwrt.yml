@@ -167,6 +167,13 @@ jobs:
           echo '::error::the rust toolchain came back after make defconfig and does not fit the six hour job budget'
           exit 1
         fi
+        # Same trap for the packages cut for time (docker/ruby) or for a real
+        # upstream build break (the out-of-tree r8168 driver): defconfig refills
+        # anything the image profile declares as a default.
+        if grep -nE '^CONFIG_PACKAGE_(kmod-r8168|r8168-rss|docker|dockerd|containerd|runc|ruby|libruby)=' .config; then
+          echo '::error::a package cut from the build came back after make defconfig'
+          exit 1
+        fi
         echo "rust clocked out: $(grep -c 'is not set' .config) symbols pinned off"
         make download -j8 V=s
         find dl -size -1024c -exec ls -l {} \;
@@ -188,6 +195,19 @@ jobs:
         make -j$(nproc) tools/install
         make -j$(nproc) toolchain/install
         df -hT / | tail -1
+        # Run 40503701918 died on these two while every other package was still
+        # green, and the parallel pass only says "failed to build". Build them
+        # verbosely first: a real failure shows its reason an hour in instead of
+        # four hours in. Not fatal here on purpose - the report is the point.
+        for suspect in package/kernel/r8168 package/feeds/packages/sing-box; do
+          echo "::group::verbose preflight $suspect"
+          if make "$suspect/compile" V=sc -j1 2>&1 | tail -120; then
+            echo "preflight $suspect: ok"
+          else
+            echo "::warning::preflight $suspect failed - see the group above"
+          fi
+          echo "::endgroup::"
+        done
         echo "::group::oxidns-core verbose build"
         if ! make package/oxidns-core/compile V=s -j1; then
           echo "::error::oxidns-core failed to compile - see the group above"
@@ -252,7 +272,10 @@ jobs:
             # them sitting there. Anything untouched for 90 minutes has long been
             # unpacked (a re-download would still be correct, just slower).
             # dl/go-mod-cache is left alone: every Go package reads it all pass.
-            if [ $((i % 4)) -eq 0 ]; then
+            # Only when space is genuinely short: deleting a tarball early just
+            # makes its package re-download it later (the oxidns tarball went
+            # through that in run 40503701918).
+            if [ $((i % 4)) -eq 0 ] && [ "${freeg}" -lt 12 ]; then
               dl_before=$(du -sm dl 2>/dev/null | cut -f1)
               find dl -maxdepth 1 -type f -mmin +90 -delete 2>/dev/null || true
               dl_after=$(du -sm dl 2>/dev/null | cut -f1)
@@ -261,17 +284,28 @@ jobs:
             sleep 180
           done
         ) &
-        # One retry only: a third pass on a full disk just burns another 2h.
-        if ! make -j$(nproc); then
-          # The parallel pass swallows per-package output, so a failure arrives as
-          # a one-line "failed to build" with no reason (that is how oxidns-core
-          # died 1.5s in). Replay that package alone, verbosely, before the retry.
-          echo "::group::diagnose oxidns-core"
-          make package/oxidns-core/compile V=s -j1 2>&1 | tail -150 || true
+        # The parallel pass swallows per-package output, so a failure arrives as a
+        # one-line "failed to build" with no reason (that is how oxidns-core died
+        # 1.5s in). Replay every failed package alone, verbosely, then stop: with
+        # a six hour ceiling a serial world retry cannot finish, it just burns the
+        # remaining time (run 40503701918 spent its last 14 minutes recompiling
+        # the kernel single threaded and produced nothing).
+        if ! make -j$(nproc) 2>&1 | tee /tmp/world.log; then
+          grep -oE 'package/[A-Za-z0-9._/-]+ failed to build' /tmp/world.log \
+            | awk '{print $1}' | sort -u > /tmp/failed.txt || true
+          echo "::group::failed packages"
+          cat /tmp/failed.txt
+          echo "::endgroup::"
+          while read -r pkg; do
+            [ -n "$pkg" ] || continue
+            echo "::group::verbose rebuild $pkg"
+            make "$pkg/compile" V=sc -j1 2>&1 | tail -120 || true
+            echo "::endgroup::"
+          done < /tmp/failed.txt
           df -hT / | tail -1
           du -sh dl build_dir staging_dir tmp 2>/dev/null || true
-          echo "::endgroup::"
-          make -j1 V=s
+          echo "::error::world failed - reasons are in the groups above"
+          exit 1
         fi
         echo "status=success" >> "$GITHUB_OUTPUT"
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
