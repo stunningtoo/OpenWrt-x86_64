@@ -149,6 +149,16 @@ jobs:
       run: |
         cd openwrt
         make defconfig
+        # make defconfig keeps what .config already pins and fills everything else
+        # from defaults, so simply deleting a line is not enough: the passwall
+        # includes declare the rust core default-on and it comes straight back.
+        # The '# ... is not set' lines in .config pin it off; check that here in
+        # seconds instead of finding out three hours into the compile pass.
+        if grep -nE '^CONFIG_[A-Z_0-9]*(Shadowsocks_Rust|shadowsocks-rust|PACKAGE_rust)=' .config; then
+          echo '::error::the rust toolchain came back after make defconfig and does not fit the six hour job budget'
+          exit 1
+        fi
+        echo "rust clocked out: $(grep -c 'is not set' .config) symbols pinned off"
         make download -j8 V=s
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
