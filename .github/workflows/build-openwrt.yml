@@ -211,7 +211,14 @@ jobs:
             freeg=$((freeg / 1024))
             sample="$(date -u +%H:%M:%SZ) free=${freeg}G"
             if [ $((i % 10)) -eq 0 ]; then
-              sample="$sample dl=$(du -sh dl 2>/dev/null | cut -f1) staging=$(du -sh staging_dir 2>/dev/null | cut -f1) build=$(du -sh build_dir 2>/dev/null | cut -f1) rootfs=$(du -sh build_dir/target-*/root-* 2>/dev/null | cut -f1) tmp=$(du -sh tmp 2>/dev/null | cut -f1)"
+              dl=$(du -sh dl 2>/dev/null | cut -f1)
+              staging=$(du -sh staging_dir 2>/dev/null | cut -f1)
+              build=$(du -sh build_dir 2>/dev/null | cut -f1)
+              rootfs=$(du -sh build_dir/target-*/root-* 2>/dev/null | cut -f1 | tr '\n' ',')
+              tmp=$(du -sh tmp 2>/dev/null | cut -f1)
+              home=$(du -sh /home/runner 2>/dev/null | cut -f1)
+              src=$(du -sh --exclude=build_dir --exclude=staging_dir --exclude=dl --exclude=tmp --exclude=bin . 2>/dev/null | cut -f1)
+              sample="$sample dl=$dl staging=$staging build=$build rootfs=$rootfs tmp=$tmp home=$home src=$src"
             fi
             echo "$sample"
             if [ -n "${ISS:-}" ]; then
