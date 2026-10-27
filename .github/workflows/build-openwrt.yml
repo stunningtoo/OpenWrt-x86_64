@@ -172,6 +172,12 @@ jobs:
         # anything the image profile declares as a default.
         if grep -nE '^CONFIG_PACKAGE_(kmod-r8168|r8168-rss|docker|dockerd|containerd|runc|ruby|libruby)=' .config; then
           echo '::error::a package cut from the build came back after make defconfig'
+          # Say who pulls it back in, otherwise the next run is a guess too.
+          echo '--- dependents ---'
+          grep -rn --include=Makefile -e 'libruby' -e '+ruby ' -e '+ruby$' feeds package target 2>/dev/null \
+            | grep -v 'lang/ruby/Makefile' | head -20 || true
+          echo '--- selects ---'
+          grep -rn -e 'select PACKAGE_ruby' -e 'select PACKAGE_libruby' feeds package target 2>/dev/null | head -10 || true
           exit 1
         fi
         echo "rust clocked out: $(grep -c 'is not set' .config) symbols pinned off"
