@@ -77,7 +77,6 @@ jobs:
                     /opt/pipx /opt/pwsh /opt/microsoft/msodbcsql* || true
         echo "=== biggest trees left on the runner ==="
         sudo du -sh /usr/local /usr/lib /usr/share /opt /var /home 2>/dev/null | sort -h | tail -6 || true
-        sudo du -sh /opt/* /usr/local/* /home/runner/* 2>/dev/null | sort -h | tail -10 || true
         after=$(df --output=avail -BM / | tail -1 | tr -d ' M')
         echo "free space before: ${before} MB, after: ${after} MB"
         df -hT /
@@ -87,7 +86,10 @@ jobs:
         DEBIAN_FRONTEND: noninteractive
       run: |
         set -euo pipefail
-        sudo apt-get -qq update
+        # An apt index fetch from a slow mirror cost 18 minutes in run 40503701918
+        # (against 28 seconds the run before). Cap it: the image already ships
+        # working lists, so a timeout here costs nothing but a stale index.
+        timeout 300 sudo apt-get -qq update || echo "apt update timed out, using the image index"
         sudo apt-get -qq install --no-install-recommends \
           build-essential asciidoc binutils bzip2 gawk gettext \
           libncurses-dev libz-dev patch python3 unzip zlib1g-dev \
@@ -118,11 +120,55 @@ jobs:
         df -hT / /mnt 2>/dev/null || true
 
     - name: Clone source code
+      id: clone
       working-directory: /workdir
       run: |
         df -hT $PWD
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+        echo "sha=$(git -C openwrt rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the toolchain cache
+      # Building tools/ plus the cross toolchain costs 68 minutes of every run
+      # (measured: 12:55Z to 14:03Z in run 40503701918) and the result depends on
+      # the lede commit only, not on .config. Keep it in the actions cache so the
+      # six hour ceiling pays that bill once instead of every time. A miss, a
+      # corrupt archive or an eviction is harmless: the next step verifies what
+      # landed and the preflight rebuilds anything that is missing.
+      id: toolchain-cache
+      continue-on-error: true
+      uses: actions/cache/restore@v4
+      with:
+        # Absolute paths on purpose: the tree lives at /workdir/openwrt with a
+        # symlink in the workspace, and an archived symlinked directory is a
+        # corner case no one needs in a six hour job.
+        path: |
+          /workdir/openwrt/staging_dir/host
+          /workdir/openwrt/staging_dir/toolchain-*
+          /workdir/openwrt/build_dir/host
+          /workdir/openwrt/build_dir/hostpkg
+          /workdir/openwrt/build_dir/toolchain-*
+        key: ow-toolchain-${{ runner.os }}-${{ steps.clone.outputs.sha }}
+
+    - name: Verify the toolchain cache
+      id: toolchain-verify
+      run: |
+        set -euo pipefail
+        ok=false
+        if [ "${{ steps.toolchain-cache.outputs.cache-hit }}" = "true" ]; then
+          cd openwrt
+          if ls staging_dir/toolchain-*/lib/ld-musl-*.so* >/dev/null 2>&1 \
+             && ls staging_dir/toolchain-*/bin/*-openwrt-linux-musl-gcc >/dev/null 2>&1 \
+             && [ -d staging_dir/host/stamp ]; then
+            ok=true
+          else
+            echo "::warning::toolchain cache restored but incomplete, discarding it"
+            rm -rf staging_dir/host staging_dir/toolchain-* \
+                   build_dir/host build_dir/hostpkg build_dir/toolchain-*
+          fi
+        fi
+        echo "ok=$ok" >> "$GITHUB_OUTPUT"
+        echo "toolchain cache usable: $ok"
 
     - name: Load custom feeds
       run: |
@@ -167,17 +213,20 @@ jobs:
           echo '::error::the rust toolchain came back after make defconfig and does not fit the six hour job budget'
           exit 1
         fi
-        # Same trap for the packages cut for time (docker/ruby) or for a real
-        # upstream build break (the out-of-tree r8168 driver): defconfig refills
-        # anything the image profile declares as a default.
-        if grep -nE '^CONFIG_PACKAGE_(kmod-r8168|r8168-rss|docker|dockerd|containerd|runc|ruby|libruby)=' .config; then
+        # Same trap for the packages cut for time (the docker stack) or for a real
+        # upstream build break (the out-of-tree r8168 driver, and sing-box): the
+        # image profile defaults refill whatever .config leaves unspecified.
+        # ruby is deliberately absent here: luci-app-openclash depends on it, so
+        # its "is not set" pin never survives defconfig and failing on it only
+        # costs a seven minute run.
+        if grep -nE '^CONFIG_PACKAGE_(kmod-r8168|r8168-rss|docker|dockerd|containerd|runc|sing-box)=' .config; then
           echo '::error::a package cut from the build came back after make defconfig'
           # Say who pulls it back in, otherwise the next run is a guess too.
           echo '--- dependents ---'
-          grep -rn --include=Makefile -e 'libruby' -e '+ruby ' -e '+ruby$' feeds package target 2>/dev/null \
-            | grep -v 'lang/ruby/Makefile' | head -20 || true
+          grep -rn --include=Makefile -e 'sing-box' -e 'r8168' feeds package target 2>/dev/null \
+            | head -20 || true
           echo '--- selects ---'
-          grep -rn -e 'select PACKAGE_ruby' -e 'select PACKAGE_libruby' feeds package target 2>/dev/null | head -10 || true
+          grep -rn -e 'select PACKAGE_sing-box' -e 'select PACKAGE_kmod-r8168' feeds package target 2>/dev/null | head -10 || true
           exit 1
         fi
         echo "rust clocked out: $(grep -c 'is not set' .config) symbols pinned off"
@@ -198,22 +247,13 @@ jobs:
         # the tarball layout and the recipe disagree.
         make package/oxidns-core/prepare V=s
         ls -l build_dir/target-x86_64_musl/oxidns-core-1.6.1 | head -8
+        # Unconditional on purpose: with a cache hit the stamps are already in
+        # place and both targets return in seconds, while a stale or partial
+        # restore still gets rebuilt. Skipping them on a hit would trade 65
+        # minutes for a failure mode nobody can debug from the log.
         make -j$(nproc) tools/install
         make -j$(nproc) toolchain/install
         df -hT / | tail -1
-        # Run 40503701918 died on these two while every other package was still
-        # green, and the parallel pass only says "failed to build". Build them
-        # verbosely first: a real failure shows its reason an hour in instead of
-        # four hours in. Not fatal here on purpose - the report is the point.
-        for suspect in package/kernel/r8168 package/feeds/packages/sing-box; do
-          echo "::group::verbose preflight $suspect"
-          if make "$suspect/compile" V=sc -j1 2>&1 | tail -120; then
-            echo "preflight $suspect: ok"
-          else
-            echo "::warning::preflight $suspect failed - see the group above"
-          fi
-          echo "::endgroup::"
-        done
         echo "::group::oxidns-core verbose build"
         if ! make package/oxidns-core/compile V=s -j1; then
           echo "::error::oxidns-core failed to compile - see the group above"
@@ -221,6 +261,25 @@ jobs:
         fi
         echo "::endgroup::"
         ls -l build_dir/target-x86_64_musl/oxidns-core*/ipkg-install/usr/bin/ 2>/dev/null || true
+
+    - name: Save the toolchain cache
+      # Only when this run built it itself: on a hit the entry already exists and
+      # cache/save refuses to overwrite, and the preflight output is the only
+      # thing worth keeping (dl/ and build_dir/target-* are run specific).
+      if: steps.toolchain-verify.outputs.ok != 'true'
+      continue-on-error: true
+      uses: actions/cache/save@v4
+      with:
+        # Absolute paths on purpose: the tree lives at /workdir/openwrt with a
+        # symlink in the workspace, and an archived symlinked directory is a
+        # corner case no one needs in a six hour job.
+        path: |
+          /workdir/openwrt/staging_dir/host
+          /workdir/openwrt/staging_dir/toolchain-*
+          /workdir/openwrt/build_dir/host
+          /workdir/openwrt/build_dir/hostpkg
+          /workdir/openwrt/build_dir/toolchain-*
+        key: ow-toolchain-${{ runner.os }}-${{ steps.clone.outputs.sha }}
 
     - name: Compile the firmware
       id: compile
