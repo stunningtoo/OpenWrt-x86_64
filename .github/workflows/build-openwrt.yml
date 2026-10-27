@@ -67,8 +67,17 @@ jobs:
         sudo apt-get -qq clean || true
         sudo rm -rf /var/lib/apt/lists/* || true
         sudo docker image prune --all --force || true
+        # Second pass: tool caches and vendor SDKs the image carries for other
+        # languages. None of them are used by an OpenWrt build (the rust toolchain
+        # is off in .config), and every gigabyte here is a gigabyte the 72G runner
+        # does not have to hand to build_dir.
+        sudo rm -rf /home/linuxbrew /home/runner/.cache /home/runner/.cargo \
+                    /home/runner/.rustup /home/runner/.dotnet /usr/local/.dotnet \
+                    /usr/local/swift /usr/local/lib/heroku /usr/local/heroku \
+                    /opt/pipx /opt/pwsh /opt/microsoft/msodbcsql* || true
         echo "=== biggest trees left on the runner ==="
         sudo du -sh /usr/local /usr/lib /usr/share /opt /var /home 2>/dev/null | sort -h | tail -6 || true
+        sudo du -sh /opt/* /usr/local/* /home/runner/* 2>/dev/null | sort -h | tail -10 || true
         after=$(df --output=avail -BM / | tail -1 | tr -d ' M')
         echo "free space before: ${before} MB, after: ${after} MB"
         df -hT /
@@ -230,9 +239,24 @@ jobs:
               src=$(du -sh --exclude=build_dir --exclude=staging_dir --exclude=dl --exclude=tmp --exclude=bin . 2>/dev/null | cut -f1)
               sample="$sample dl=$dl staging=$staging build=$build rootfs=$rootfs tmp=$tmp home=$home src=$src"
             fi
+            if [ $((i % 20)) -eq 0 ]; then
+              heavy=$(du -sm build_dir/*/* 2>/dev/null | sort -rn | head -5 | tr '\n' ' ')
+              sample="$sample heavy=[$heavy]"
+            fi
             echo "$sample"
             if [ -n "${ISS:-}" ]; then
               gh api "repos/$GITHUB_REPOSITORY/issues/$ISS/comments" -f body="$sample" >/dev/null 2>&1 || true
+            fi
+            # A tarball in dl/ is read exactly once, when its package unpacks, and
+            # is dead weight afterwards: the last run ran out of disk with 4.7G of
+            # them sitting there. Anything untouched for 90 minutes has long been
+            # unpacked (a re-download would still be correct, just slower).
+            # dl/go-mod-cache is left alone: every Go package reads it all pass.
+            if [ $((i % 4)) -eq 0 ]; then
+              dl_before=$(du -sm dl 2>/dev/null | cut -f1)
+              find dl -maxdepth 1 -type f -mmin +90 -delete 2>/dev/null || true
+              dl_after=$(du -sm dl 2>/dev/null | cut -f1)
+              echo "$(date -u +%H:%M:%SZ) dl janitor: ${dl_before:-?}M -> ${dl_after:-?}M"
             fi
             sleep 180
           done
