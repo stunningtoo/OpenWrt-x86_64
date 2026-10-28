@@ -126,67 +126,7 @@ jobs:
         df -hT $PWD
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
-        # A fresh clone is stamped with the current time, which makes every file in
-        # the restored toolchain cache look stale and sends make through a full
-        # rebuild: run 40625178150 restored the cache in 40 seconds and then died
-        # with "ERROR: toolchain/binutils failed to build" because it was rebuilding
-        # binutils inside a build directory that had already been built. Backdating
-        # the clone lets the cached stamps and .prepared files win instead.
-        files=$(find openwrt -name .git -prune -o -type f -print | wc -l)
-        find openwrt -name .git -prune -o -type f -exec touch -t 202001010000 {} + || true
-        echo "backdated $files source files to 2020-01-01 so the cache is reused"
         echo "sha=$(git -C openwrt rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-    - name: Restore the toolchain cache
-      # Building tools/ plus the cross toolchain costs 68 minutes of every run
-      # (measured: 12:55Z to 14:03Z in run 40503701918) and the result depends on
-      # the lede commit only, not on .config. Keep it in the actions cache so the
-      # six hour ceiling pays that bill once instead of every time. A miss, a
-      # corrupt archive or an eviction is harmless: the next step verifies what
-      # landed and the preflight rebuilds anything that is missing.
-      id: toolchain-cache
-      continue-on-error: true
-      uses: actions/cache/restore@v4
-      with:
-        # Absolute paths on purpose: the tree lives at /workdir/openwrt with a
-        # symlink in the workspace, and an archived symlinked directory is a
-        # corner case no one needs in a six hour job.
-        path: |
-          /workdir/openwrt/staging_dir/host
-          /workdir/openwrt/staging_dir/toolchain-*
-          /workdir/openwrt/build_dir/host
-          /workdir/openwrt/build_dir/hostpkg
-          /workdir/openwrt/build_dir/toolchain-*
-        key: ow-toolchain-${{ runner.os }}-${{ steps.clone.outputs.sha }}
-
-    - name: Verify the toolchain cache
-      id: toolchain-verify
-      run: |
-        set -euo pipefail
-        ok=false
-        if [ "${{ steps.toolchain-cache.outputs.cache-hit }}" = "true" ]; then
-          cd openwrt
-          if ls staging_dir/toolchain-*/lib/ld-musl-*.so* >/dev/null 2>&1 \
-             && ls staging_dir/toolchain-*/bin/*-openwrt-linux-musl-gcc >/dev/null 2>&1 \
-             && [ -d staging_dir/host/stamp ]; then
-            ok=true
-            # The archive carries the mtimes it was saved with, so every restored
-            # stamp is older than the tree git just cloned and make would rebuild
-            # the whole toolchain instead of reusing it. That is exactly how run
-            # 40625178150 died: a cache hit, then "ERROR: toolchain/binutils
-            # failed to build" in the preflight, because binutils was being
-            # rebuilt inside a build directory that was already built.
-            stamps=$(find staging_dir -type f -path '*/stamp/*' | wc -l)
-            find staging_dir -type f -path '*/stamp/*' -exec touch {} +
-            echo "touched $stamps restored stamps so make reuses the cached toolchain"
-          else
-            echo "::warning::toolchain cache restored but incomplete, discarding it"
-            rm -rf staging_dir/host staging_dir/toolchain-* \
-                   build_dir/host build_dir/hostpkg build_dir/toolchain-*
-          fi
-        fi
-        echo "ok=$ok" >> "$GITHUB_OUTPUT"
-        echo "toolchain cache usable: $ok"
 
     - name: Load custom feeds
       run: |
@@ -251,53 +191,6 @@ jobs:
         make download -j8 V=s
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
-
-    - name: Pre-flight oxidns-core
-      # The parallel compile pass swallows per-package output, so a bad recipe
-      # here would only resurface as a nameless "failed to build" hours later.
-      # A package target cannot be built on its own though: package/libs/toolchain
-      # wants staging_dir/toolchain-*/lib/ld-musl-*.so*, which only appears after
-      # tools/install and toolchain/install. Build those first (the main pass then
-      # reuses them), so the verbose package build below actually runs.
-      run: |
-        cd openwrt
-        # Cheap first: unpacking needs no cross toolchain and dies in seconds if
-        # the tarball layout and the recipe disagree.
-        make package/oxidns-core/prepare V=s
-        ls -l build_dir/target-x86_64_musl/oxidns-core-1.6.1 | head -8
-        # Unconditional on purpose: with a cache hit the stamps are already in
-        # place and both targets return in seconds, while a stale or partial
-        # restore still gets rebuilt. Skipping them on a hit would trade 65
-        # minutes for a failure mode nobody can debug from the log.
-        make -j$(nproc) tools/install
-        make -j$(nproc) toolchain/install
-        df -hT / | tail -1
-        echo "::group::oxidns-core verbose build"
-        if ! make package/oxidns-core/compile V=s -j1; then
-          echo "::error::oxidns-core failed to compile - see the group above"
-          exit 1
-        fi
-        echo "::endgroup::"
-        ls -l build_dir/target-x86_64_musl/oxidns-core*/ipkg-install/usr/bin/ 2>/dev/null || true
-
-    - name: Save the toolchain cache
-      # Only when this run built it itself: on a hit the entry already exists and
-      # cache/save refuses to overwrite, and the preflight output is the only
-      # thing worth keeping (dl/ and build_dir/target-* are run specific).
-      if: steps.toolchain-verify.outputs.ok != 'true'
-      continue-on-error: true
-      uses: actions/cache/save@v4
-      with:
-        # Absolute paths on purpose: the tree lives at /workdir/openwrt with a
-        # symlink in the workspace, and an archived symlinked directory is a
-        # corner case no one needs in a six hour job.
-        path: |
-          /workdir/openwrt/staging_dir/host
-          /workdir/openwrt/staging_dir/toolchain-*
-          /workdir/openwrt/build_dir/host
-          /workdir/openwrt/build_dir/hostpkg
-          /workdir/openwrt/build_dir/toolchain-*
-        key: ow-toolchain-${{ runner.os }}-${{ steps.clone.outputs.sha }}
 
     - name: Compile the firmware
       id: compile
