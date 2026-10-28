@@ -63,13 +63,6 @@
 
 **失败重试机制**：上游 SHA 通过 `upstream-tracker` 标签记录，仅在编译成功后更新。构建失败不会更新标签，下一个检查点会自动重试。
 
-## 自定义
-
-1. **调整插件**：编辑 `.config`（`CONFIG_PACKAGE_xxx=y`）。注意核对名称是否存在于已配置的 feed 中，透明代理类插件同时只能运行一个；
-2. **添加第三方源**：编辑 `diy-part1.sh`（在 feeds 更新前执行），源码里预置了 iStore、kenzok8/openwrt-packages、kenzok8/small 三个常用源；
-3. **构建期定制**：编辑 `diy-part2.sh`（feeds 更新后执行），当前包含：修改默认 IP、清除 root 密码、shortcut-fe Linux 6.18+ 内核兼容补丁、内置 tgpt。
-
-修改后推送并在 Actions 页手动触发即可；或等待每周自动检查。
 
 ## 致谢
 
