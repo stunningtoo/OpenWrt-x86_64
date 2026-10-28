@@ -219,7 +219,7 @@ jobs:
         # ruby is deliberately absent here: luci-app-openclash depends on it, so
         # its "is not set" pin never survives defconfig and failing on it only
         # costs a seven minute run.
-        if grep -nE '^CONFIG_PACKAGE_(kmod-r8168|r8168-rss|docker|dockerd|containerd|runc|sing-box)=' .config; then
+        if grep -nE '^CONFIG_PACKAGE_(kmod-r8168|r8168-rss|docker|dockerd|containerd|runc|sing-box|tuic-client)=' .config; then
           echo '::error::a package cut from the build came back after make defconfig'
           # Say who pulls it back in, otherwise the next run is a guess too.
           echo '--- dependents ---'
