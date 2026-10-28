@@ -126,6 +126,15 @@ jobs:
         df -hT $PWD
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+        # A fresh clone is stamped with the current time, which makes every file in
+        # the restored toolchain cache look stale and sends make through a full
+        # rebuild: run 40625178150 restored the cache in 40 seconds and then died
+        # with "ERROR: toolchain/binutils failed to build" because it was rebuilding
+        # binutils inside a build directory that had already been built. Backdating
+        # the clone lets the cached stamps and .prepared files win instead.
+        files=$(find openwrt -name .git -prune -o -type f -print | wc -l)
+        find openwrt -name .git -prune -o -type f -exec touch -t 202001010000 {} + || true
+        echo "backdated $files source files to 2020-01-01 so the cache is reused"
         echo "sha=$(git -C openwrt rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
     - name: Restore the toolchain cache
@@ -161,6 +170,15 @@ jobs:
              && ls staging_dir/toolchain-*/bin/*-openwrt-linux-musl-gcc >/dev/null 2>&1 \
              && [ -d staging_dir/host/stamp ]; then
             ok=true
+            # The archive carries the mtimes it was saved with, so every restored
+            # stamp is older than the tree git just cloned and make would rebuild
+            # the whole toolchain instead of reusing it. That is exactly how run
+            # 40625178150 died: a cache hit, then "ERROR: toolchain/binutils
+            # failed to build" in the preflight, because binutils was being
+            # rebuilt inside a build directory that was already built.
+            stamps=$(find staging_dir -type f -path '*/stamp/*' | wc -l)
+            find staging_dir -type f -path '*/stamp/*' -exec touch {} +
+            echo "touched $stamps restored stamps so make reuses the cached toolchain"
           else
             echo "::warning::toolchain cache restored but incomplete, discarding it"
             rm -rf staging_dir/host staging_dir/toolchain-* \
